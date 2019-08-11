@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "philiprehberger-csv-kit"
-version = "0.1.0"
+version = "0.1.1"
 description = "Enhanced CSV reader and writer with automatic type inference."
 readme = "README.md"
 license = "MIT"
@@ -24,9 +24,16 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/philiprehberger/py-csv-kit"
+Homepage = "https://github.com/philiprehberger/py-csv-kit#readme"
 Repository = "https://github.com/philiprehberger/py-csv-kit"
 Issues = "https://github.com/philiprehberger/py-csv-kit/issues"
+Changelog = "https://github.com/philiprehberger/py-csv-kit/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/philiprehberger_csv_kit"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+strict = true

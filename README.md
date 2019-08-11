@@ -6,7 +6,7 @@
 
 Enhanced CSV reader and writer with automatic type inference.
 
-## Install
+## Installation
 
 ```bash
 pip install philiprehberger-csv-kit
