@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0 (2026-03-27)
+
+- Add `stream_csv()` generator for memory-efficient chunked reading of large files
+- Add `column_stats()` for per-column statistics (min, max, unique, nulls, count)
+- Add `.github/` issue templates, PR template, and Dependabot config
+- Update README with full badge set and all standard sections
+
 ## 0.1.1 (2026-03-22)
 
 - Rename Install section to Installation in README

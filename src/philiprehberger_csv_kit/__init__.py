@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import csv
+from collections.abc import Iterator
 from pathlib import Path
 
-__all__ = ["read_csv", "write_csv", "infer_types"]
+__all__ = ["read_csv", "write_csv", "infer_types", "stream_csv", "column_stats"]
 
 
 def _infer_value(value: str) -> int | float | bool | None | str:
@@ -93,3 +94,86 @@ def write_csv(
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
+
+
+def stream_csv(
+    path: str | Path,
+    chunk_size: int = 1000,
+    encoding: str = "utf-8",
+) -> Iterator[list[dict[str, str]]]:
+    """Read a CSV file in chunks, yielding lists of row dicts.
+
+    This is a generator that reads the file lazily, making it suitable for
+    large files that do not fit in memory.
+
+    Args:
+        path: Path to the CSV file.
+        chunk_size: Number of rows per chunk.
+        encoding: File encoding.
+
+    Yields:
+        Lists of row dicts, each list containing up to *chunk_size* rows.
+    """
+    with open(path, newline="", encoding=encoding) as f:
+        reader = csv.DictReader(f)
+        chunk: list[dict[str, str]] = []
+        for row in reader:
+            chunk.append(row)
+            if len(chunk) >= chunk_size:
+                yield chunk
+                chunk = []
+        if chunk:
+            yield chunk
+
+
+def column_stats(
+    path: str | Path,
+    columns: list[str] | None = None,
+) -> dict[str, dict[str, object]]:
+    """Compute per-column statistics for a CSV file.
+
+    For each column, returns ``min``, ``max``, ``unique`` count,
+    ``nulls`` count, and total ``count``.  Uses type inference for
+    min/max comparison so numeric columns compare numerically.
+
+    Args:
+        path: Path to the CSV file.
+        columns: Column names to analyse.  If ``None``, all columns are
+            included.
+
+    Returns:
+        Dict mapping column names to their statistics dicts.
+    """
+    rows = read_csv(path, typed=True)
+    if not rows:
+        return {}
+
+    target_cols = columns if columns is not None else list(rows[0].keys())
+
+    stats: dict[str, dict[str, object]] = {}
+    for col in target_cols:
+        values = [row.get(col) for row in rows]
+        non_null = [v for v in values if v is not None]
+        nulls = len(values) - len(non_null)
+        unique = len(set(non_null))
+
+        col_min: object = None
+        col_max: object = None
+        if non_null:
+            try:
+                col_min = min(non_null)  # type: ignore[type-var]
+                col_max = max(non_null)  # type: ignore[type-var]
+            except TypeError:
+                str_vals = [str(v) for v in non_null]
+                col_min = min(str_vals)
+                col_max = max(str_vals)
+
+        stats[col] = {
+            "min": col_min,
+            "max": col_max,
+            "unique": unique,
+            "nulls": nulls,
+            "count": len(values),
+        }
+
+    return stats
