@@ -71,7 +71,58 @@ stats = column_stats("data.csv")
 stats = column_stats("data.csv", columns=["age", "score"])
 ```
 
-### Type Inference
+### Dialect detection
+
+```python
+from philiprehberger_csv_kit import detect_dialect
+
+# Detect from a file
+result = detect_dialect("data.tsv")
+print(result.delimiter)   # "\t"
+print(result.quotechar)   # '"'
+
+# Detect from a raw text sample
+result = detect_dialect("name;age;score\nAlice;30;9.5\n")
+print(result.delimiter)   # ";"
+```
+
+### Column data quality
+
+```python
+from philiprehberger_csv_kit import read_csv, column_quality
+
+rows = read_csv("data.csv")
+quality = column_quality(rows, "email")
+print(quality.completeness)      # 87.5  (percentage of non-null values)
+print(quality.cardinality_ratio)  # 0.95  (unique values / total rows)
+print(quality.null_count)         # 2
+```
+
+### Transformation pipeline
+
+```python
+from philiprehberger_csv_kit import read_csv, CsvPipeline
+
+rows = read_csv("employees.csv")
+
+result = (
+    CsvPipeline(rows)
+    .filter(lambda r: r["age"] > 18)
+    .map_column("name", str.upper)
+    .sort_by("age")
+    .to_list()
+)
+
+# Group by department
+groups = (
+    CsvPipeline(rows)
+    .filter(lambda r: r["active"] is True)
+    .group_by("department")
+)
+# {"Engineering": [...], "Sales": [...]}
+```
+
+### Type inference
 
 ```python
 from philiprehberger_csv_kit import infer_types
@@ -83,13 +134,16 @@ typed = infer_types(raw)
 
 ## API
 
-| Function | Description |
+| Function / Class | Description |
 |---|---|
 | `read_csv(path, typed=True, encoding="utf-8")` | Read CSV file, return list of dicts. Infers types when `typed=True`. |
 | `write_csv(path, rows, columns=None, encoding="utf-8")` | Write list of dicts to CSV. Optional column filter. |
 | `stream_csv(path, chunk_size=1000, encoding="utf-8")` | Generator yielding chunks of row dicts for memory-efficient reading. |
 | `column_stats(path, columns=None)` | Compute per-column stats: min, max, unique, nulls, count. |
 | `infer_types(rows)` | Cast string values to int, float, bool, or None where possible. |
+| `detect_dialect(filepath_or_sample)` | Detect CSV delimiter, quotechar, and formatting from a file or text sample. Returns `DialectResult`. |
+| `column_quality(rows, column)` | Score column data quality: completeness %, cardinality ratio, null count. Returns `QualityResult`. |
+| `CsvPipeline(rows)` | Chainable pipeline with `.filter()`, `.map_column()`, `.add_column()`, `.rename_column()`, `.select_columns()`, `.sort_by()`, `.group_by()`, `.head()`, `.tail()`, `.to_list()`, `.count()`, `.first()`. |
 
 ## Development
 

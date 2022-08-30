@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0 (2026-03-28)
+
+- Add `detect_dialect()` for automatic delimiter and dialect detection via `csv.Sniffer`
+- Add `column_quality()` for data quality scoring (completeness %, cardinality ratio, null count)
+- Add `CsvPipeline` chainable transformation pipeline with `filter`, `map_column`, `group_by`, `sort_by`, and more
+- Add `DialectResult` and `QualityResult` dataclasses for structured return values
+
 ## 0.2.0 (2026-03-27)
 
 - Add `stream_csv()` generator for memory-efficient chunked reading of large files

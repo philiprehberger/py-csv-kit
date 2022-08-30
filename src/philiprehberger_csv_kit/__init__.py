@@ -3,10 +3,37 @@
 from __future__ import annotations
 
 import csv
-from collections.abc import Iterator
+import io
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
-__all__ = ["read_csv", "write_csv", "infer_types", "stream_csv", "column_stats"]
+__all__ = [
+    "read_csv",
+    "write_csv",
+    "infer_types",
+    "stream_csv",
+    "column_stats",
+    "detect_dialect",
+    "column_quality",
+    "CsvPipeline",
+    "DialectResult",
+    "QualityResult",
+]
+
+# ---------------------------------------------------------------------------
+# Type aliases
+# ---------------------------------------------------------------------------
+
+Row = dict[str, Any]
+Predicate = Callable[[Row], bool]
+MapFn = Callable[[Any], Any]
+
+
+# ---------------------------------------------------------------------------
+# Value inference
+# ---------------------------------------------------------------------------
 
 
 def _infer_value(value: str) -> int | float | bool | None | str:
@@ -42,6 +69,11 @@ def infer_types(rows: list[dict[str, str]]) -> list[dict[str, int | float | bool
         {key: _infer_value(val) for key, val in row.items()}
         for row in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# Read / Write / Stream
+# ---------------------------------------------------------------------------
 
 
 def read_csv(
@@ -126,6 +158,11 @@ def stream_csv(
             yield chunk
 
 
+# ---------------------------------------------------------------------------
+# Column statistics
+# ---------------------------------------------------------------------------
+
+
 def column_stats(
     path: str | Path,
     columns: list[str] | None = None,
@@ -177,3 +214,279 @@ def column_stats(
         }
 
     return stats
+
+
+# ---------------------------------------------------------------------------
+# Dialect detection
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DialectResult:
+    """Result of CSV dialect detection."""
+
+    delimiter: str
+    quotechar: str | None
+    doublequote: bool
+    skipinitialspace: bool
+    lineterminator: str
+
+    def to_dict(self) -> dict[str, str | bool | None]:
+        """Return the dialect as a plain dictionary."""
+        return {
+            "delimiter": self.delimiter,
+            "quotechar": self.quotechar,
+            "doublequote": self.doublequote,
+            "skipinitialspace": self.skipinitialspace,
+            "lineterminator": self.lineterminator,
+        }
+
+
+def detect_dialect(filepath_or_sample: str | Path) -> DialectResult:
+    """Detect the CSV dialect from a file path or a raw text sample.
+
+    Uses :func:`csv.Sniffer` to detect the delimiter, quotechar, and
+    other formatting properties.
+
+    Args:
+        filepath_or_sample: Either a file path (``str`` or ``Path``)
+            pointing to a CSV file, or a raw CSV text sample (``str``).
+
+    Returns:
+        A :class:`DialectResult` with the detected properties.
+
+    Raises:
+        csv.Error: If the sniffer cannot determine the dialect.
+    """
+    sample: str
+    path = Path(filepath_or_sample) if not isinstance(filepath_or_sample, Path) else filepath_or_sample
+
+    # Heuristic: if the string looks like a file path that exists, read it
+    if path.exists():
+        with open(path, newline="", encoding="utf-8") as f:
+            sample = f.read(8192)
+    else:
+        if not isinstance(filepath_or_sample, str):
+            raise FileNotFoundError(f"File not found: {filepath_or_sample}")
+        sample = filepath_or_sample
+
+    sniffer = csv.Sniffer()
+    dialect = sniffer.sniff(sample)
+
+    return DialectResult(
+        delimiter=dialect.delimiter,
+        quotechar=dialect.quotechar,
+        doublequote=dialect.doublequote,
+        skipinitialspace=dialect.skipinitialspace,
+        lineterminator=dialect.lineterminator,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Column data quality scoring
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class QualityResult:
+    """Data quality metrics for a single column."""
+
+    completeness: float
+    """Percentage of non-null values (0.0 -- 100.0)."""
+
+    cardinality_ratio: float
+    """Ratio of unique non-null values to total rows (0.0 -- 1.0)."""
+
+    null_count: int
+    """Number of null / empty values."""
+
+    total_count: int
+    """Total number of rows examined."""
+
+    def to_dict(self) -> dict[str, float | int]:
+        """Return the quality metrics as a plain dictionary."""
+        return {
+            "completeness": self.completeness,
+            "cardinality_ratio": self.cardinality_ratio,
+            "null_count": self.null_count,
+            "total_count": self.total_count,
+        }
+
+
+def column_quality(
+    rows: list[dict[str, Any]],
+    column: str,
+) -> QualityResult:
+    """Score the data quality of a single column.
+
+    Args:
+        rows: List of row dicts (may be raw strings or type-inferred).
+        column: The column name to evaluate.
+
+    Returns:
+        A :class:`QualityResult` with completeness percentage,
+        cardinality ratio, null count, and total count.
+
+    Raises:
+        KeyError: If *column* is not present in any row.
+    """
+    if not rows:
+        return QualityResult(
+            completeness=0.0,
+            cardinality_ratio=0.0,
+            null_count=0,
+            total_count=0,
+        )
+
+    # Validate column exists in at least one row
+    if not any(column in row for row in rows):
+        raise KeyError(f"Column '{column}' not found in any row")
+
+    total = len(rows)
+    values = [row.get(column) for row in rows]
+
+    null_count = sum(
+        1 for v in values if v is None or (isinstance(v, str) and v.strip() == "")
+    )
+    non_null_count = total - null_count
+    non_null_values = [
+        v for v in values if v is not None and not (isinstance(v, str) and v.strip() == "")
+    ]
+
+    completeness = (non_null_count / total) * 100.0 if total > 0 else 0.0
+    cardinality_ratio = len(set(non_null_values)) / total if total > 0 else 0.0
+
+    return QualityResult(
+        completeness=round(completeness, 2),
+        cardinality_ratio=round(cardinality_ratio, 4),
+        null_count=null_count,
+        total_count=total,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Chainable transformation pipeline
+# ---------------------------------------------------------------------------
+
+
+class CsvPipeline:
+    """Chainable transformation pipeline for CSV row data.
+
+    Provides a fluent API for filtering, mapping, sorting, and
+    grouping rows in an ETL-like workflow.
+
+    Example::
+
+        result = (
+            CsvPipeline(rows)
+            .filter(lambda r: r["age"] > 18)
+            .map_column("name", str.upper)
+            .sort_by("age")
+            .to_list()
+        )
+    """
+
+    __slots__ = ("_rows",)
+
+    def __init__(self, rows: list[Row]) -> None:
+        self._rows: list[Row] = list(rows)
+
+    # -- Filtering ----------------------------------------------------------
+
+    def filter(self, predicate: Predicate) -> CsvPipeline:
+        """Keep only rows for which *predicate* returns ``True``."""
+        return CsvPipeline([row for row in self._rows if predicate(row)])
+
+    def exclude(self, predicate: Predicate) -> CsvPipeline:
+        """Remove rows for which *predicate* returns ``True``."""
+        return CsvPipeline([row for row in self._rows if not predicate(row)])
+
+    # -- Mapping ------------------------------------------------------------
+
+    def map_column(self, name: str, fn: MapFn) -> CsvPipeline:
+        """Apply *fn* to the value of *name* in every row.
+
+        Rows that do not contain *name* are passed through unchanged.
+        """
+        new_rows: list[Row] = []
+        for row in self._rows:
+            new_row = dict(row)
+            if name in new_row:
+                new_row[name] = fn(new_row[name])
+            new_rows.append(new_row)
+        return CsvPipeline(new_rows)
+
+    def add_column(self, name: str, fn: Callable[[Row], Any]) -> CsvPipeline:
+        """Add a computed column *name* whose value is ``fn(row)``."""
+        new_rows: list[Row] = []
+        for row in self._rows:
+            new_row = dict(row)
+            new_row[name] = fn(row)
+            new_rows.append(new_row)
+        return CsvPipeline(new_rows)
+
+    def rename_column(self, old: str, new: str) -> CsvPipeline:
+        """Rename column *old* to *new* in every row."""
+        new_rows: list[Row] = []
+        for row in self._rows:
+            new_row = {(new if k == old else k): v for k, v in row.items()}
+            new_rows.append(new_row)
+        return CsvPipeline(new_rows)
+
+    def select_columns(self, columns: list[str]) -> CsvPipeline:
+        """Keep only the specified columns, in order."""
+        return CsvPipeline([
+            {k: row.get(k) for k in columns} for row in self._rows
+        ])
+
+    # -- Sorting ------------------------------------------------------------
+
+    def sort_by(self, key: str, *, reverse: bool = False) -> CsvPipeline:
+        """Sort rows by column *key*."""
+        return CsvPipeline(
+            sorted(self._rows, key=lambda r: r.get(key, ""), reverse=reverse)  # type: ignore[return-value]
+        )
+
+    # -- Grouping -----------------------------------------------------------
+
+    def group_by(self, key: str) -> dict[Any, list[Row]]:
+        """Group rows by the value of *key* and return a dict.
+
+        This is a terminal operation that returns a plain dict
+        mapping each distinct value to the list of rows sharing it.
+        """
+        groups: dict[Any, list[Row]] = {}
+        for row in self._rows:
+            k = row.get(key)
+            groups.setdefault(k, []).append(row)
+        return groups
+
+    # -- Limiting -----------------------------------------------------------
+
+    def head(self, n: int) -> CsvPipeline:
+        """Keep only the first *n* rows."""
+        return CsvPipeline(self._rows[:n])
+
+    def tail(self, n: int) -> CsvPipeline:
+        """Keep only the last *n* rows."""
+        return CsvPipeline(self._rows[-n:] if n > 0 else [])
+
+    # -- Terminal operations ------------------------------------------------
+
+    def to_list(self) -> list[Row]:
+        """Return the current rows as a plain list of dicts."""
+        return list(self._rows)
+
+    def count(self) -> int:
+        """Return the number of rows."""
+        return len(self._rows)
+
+    def first(self) -> Row | None:
+        """Return the first row, or ``None`` if empty."""
+        return self._rows[0] if self._rows else None
+
+    def __len__(self) -> int:
+        return len(self._rows)
+
+    def __iter__(self) -> Iterator[Row]:
+        return iter(self._rows)
