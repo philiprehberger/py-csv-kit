@@ -1,15 +1,24 @@
 from __future__ import annotations
 
+import json
+
 from philiprehberger_csv_kit import (
     CsvPipeline,
     DialectResult,
     QualityResult,
     column_quality,
     column_stats,
+    deduplicate,
     detect_dialect,
+    find_duplicates,
+    head,
     infer_types,
     read_csv,
+    sample,
     stream_csv,
+    stream_csv_rows,
+    to_dict_list,
+    to_json,
     write_csv,
 )
 
@@ -390,3 +399,329 @@ def test_pipeline_does_not_mutate_input():
     rows = [{"name": "alice"}]
     CsvPipeline(rows).map_column("name", str.upper).to_list()
     assert rows[0]["name"] == "alice"
+
+
+# --- Streaming rows ---
+
+def test_stream_csv_rows_typed(tmp_path):
+    csv_file = tmp_path / "stream_rows.csv"
+    csv_file.write_text("name,age\nAlice,30\nBob,25\n", encoding="utf-8")
+
+    rows = list(stream_csv_rows(csv_file, typed=True))
+    assert len(rows) == 2
+    assert rows[0]["name"] == "Alice"
+    assert rows[0]["age"] == 30
+    assert isinstance(rows[0]["age"], int)
+
+
+def test_stream_csv_rows_untyped(tmp_path):
+    csv_file = tmp_path / "stream_rows.csv"
+    csv_file.write_text("name,age\nAlice,30\n", encoding="utf-8")
+
+    rows = list(stream_csv_rows(csv_file, typed=False))
+    assert rows[0]["age"] == "30"
+
+
+def test_stream_csv_rows_empty(tmp_path):
+    csv_file = tmp_path / "empty.csv"
+    csv_file.write_text("name,age\n", encoding="utf-8")
+
+    rows = list(stream_csv_rows(csv_file))
+    assert rows == []
+
+
+def test_stream_csv_rows_is_lazy(tmp_path):
+    csv_file = tmp_path / "lazy.csv"
+    csv_file.write_text("x\n1\n2\n3\n4\n5\n", encoding="utf-8")
+
+    gen = stream_csv_rows(csv_file)
+    first = next(gen)
+    assert first["x"] == 1
+
+
+# --- Export helpers: to_json / to_dict_list ---
+
+def test_to_json_basic():
+    rows = [{"name": "Alice", "age": 30}]
+    result = to_json(rows)
+    parsed = json.loads(result)
+    assert parsed == rows
+
+
+def test_to_json_compact():
+    rows = [{"a": 1}]
+    result = to_json(rows, indent=None)
+    assert "\n" not in result
+
+
+def test_to_json_empty():
+    assert to_json([]) == "[]"
+
+
+def test_to_dict_list_all_columns():
+    rows = [{"a": 1, "b": 2}, {"a": 3, "b": 4}]
+    result = to_dict_list(rows)
+    assert result == rows
+    # Verify it returns copies, not references
+    result[0]["a"] = 999
+    assert rows[0]["a"] == 1
+
+
+def test_to_dict_list_select_columns():
+    rows = [{"a": 1, "b": 2, "c": 3}]
+    result = to_dict_list(rows, columns=["a", "c"])
+    assert result == [{"a": 1, "c": 3}]
+
+
+def test_to_dict_list_missing_column():
+    rows = [{"a": 1}]
+    result = to_dict_list(rows, columns=["a", "z"])
+    assert result == [{"a": 1, "z": None}]
+
+
+# --- Column type override ---
+
+def test_infer_types_with_overrides():
+    rows = [{"id": "42", "score": "9.5", "active": "true"}]
+    result = infer_types(rows, overrides={"id": str, "score": int})
+    assert result[0]["id"] == "42"
+    assert isinstance(result[0]["id"], str)
+    assert result[0]["score"] == 9
+    assert isinstance(result[0]["score"], int)
+    # active should still be inferred normally
+    assert result[0]["active"] is True
+
+
+def test_infer_types_override_to_bool():
+    rows = [{"flag": "1"}, {"flag": "0"}, {"flag": "yes"}]
+    result = infer_types(rows, overrides={"flag": bool})
+    assert result[0]["flag"] is True
+    assert result[1]["flag"] is False
+    assert result[2]["flag"] is True
+
+
+def test_infer_types_override_empty_value():
+    rows = [{"val": ""}]
+    result = infer_types(rows, overrides={"val": int})
+    assert result[0]["val"] is None
+
+
+def test_read_csv_with_overrides(tmp_path):
+    csv_file = tmp_path / "override.csv"
+    csv_file.write_text("id,score\n42,9.5\n", encoding="utf-8")
+
+    result = read_csv(csv_file, overrides={"id": str})
+    assert result[0]["id"] == "42"
+    assert isinstance(result[0]["id"], str)
+    assert result[0]["score"] == 9.5
+
+
+def test_infer_types_override_to_float():
+    rows = [{"val": "42"}]
+    result = infer_types(rows, overrides={"val": float})
+    assert result[0]["val"] == 42.0
+    assert isinstance(result[0]["val"], float)
+
+
+# --- Head ---
+
+def test_head_basic(tmp_path):
+    csv_file = tmp_path / "head.csv"
+    csv_file.write_text("x\n1\n2\n3\n4\n5\n", encoding="utf-8")
+
+    result = head(csv_file, n=3)
+    assert len(result) == 3
+    assert result[0]["x"] == 1
+    assert result[2]["x"] == 3
+
+
+def test_head_default_n(tmp_path):
+    csv_file = tmp_path / "head.csv"
+    lines = "x\n" + "\n".join(str(i) for i in range(10)) + "\n"
+    csv_file.write_text(lines, encoding="utf-8")
+
+    result = head(csv_file)
+    assert len(result) == 5
+
+
+def test_head_fewer_rows(tmp_path):
+    csv_file = tmp_path / "head.csv"
+    csv_file.write_text("x\n1\n2\n", encoding="utf-8")
+
+    result = head(csv_file, n=10)
+    assert len(result) == 2
+
+
+def test_head_typed(tmp_path):
+    csv_file = tmp_path / "head.csv"
+    csv_file.write_text("x\n42\n", encoding="utf-8")
+
+    typed = head(csv_file, typed=True)
+    assert typed[0]["x"] == 42
+    assert isinstance(typed[0]["x"], int)
+
+    untyped = head(csv_file, typed=False)
+    assert untyped[0]["x"] == "42"
+
+
+# --- Sample ---
+
+def test_sample_basic(tmp_path):
+    csv_file = tmp_path / "sample.csv"
+    lines = "x\n" + "\n".join(str(i) for i in range(20)) + "\n"
+    csv_file.write_text(lines, encoding="utf-8")
+
+    result = sample(csv_file, n=5, seed=42)
+    assert len(result) == 5
+
+
+def test_sample_reproducible(tmp_path):
+    csv_file = tmp_path / "sample.csv"
+    lines = "x\n" + "\n".join(str(i) for i in range(20)) + "\n"
+    csv_file.write_text(lines, encoding="utf-8")
+
+    r1 = sample(csv_file, n=5, seed=42)
+    r2 = sample(csv_file, n=5, seed=42)
+    assert r1 == r2
+
+
+def test_sample_more_than_available(tmp_path):
+    csv_file = tmp_path / "sample.csv"
+    csv_file.write_text("x\n1\n2\n", encoding="utf-8")
+
+    result = sample(csv_file, n=10)
+    assert len(result) == 2
+
+
+def test_sample_empty(tmp_path):
+    csv_file = tmp_path / "sample.csv"
+    csv_file.write_text("x\n", encoding="utf-8")
+
+    result = sample(csv_file, n=5)
+    assert result == []
+
+
+# --- Duplicate detection ---
+
+def test_find_duplicates_all_columns():
+    rows = [
+        {"a": 1, "b": 2},
+        {"a": 3, "b": 4},
+        {"a": 1, "b": 2},
+        {"a": 5, "b": 6},
+        {"a": 1, "b": 2},
+    ]
+    dups = find_duplicates(rows)
+    assert len(dups) == 2
+    assert all(d == {"a": 1, "b": 2} for d in dups)
+
+
+def test_find_duplicates_by_column():
+    rows = [
+        {"name": "Alice", "age": 30},
+        {"name": "Bob", "age": 25},
+        {"name": "Alice", "age": 35},
+    ]
+    dups = find_duplicates(rows, columns=["name"])
+    assert len(dups) == 1
+    assert dups[0]["name"] == "Alice"
+    assert dups[0]["age"] == 35
+
+
+def test_find_duplicates_no_duplicates():
+    rows = [{"a": 1}, {"a": 2}, {"a": 3}]
+    assert find_duplicates(rows) == []
+
+
+def test_find_duplicates_empty():
+    assert find_duplicates([]) == []
+
+
+def test_deduplicate_all_columns():
+    rows = [
+        {"a": 1, "b": 2},
+        {"a": 3, "b": 4},
+        {"a": 1, "b": 2},
+    ]
+    result = deduplicate(rows)
+    assert len(result) == 2
+    assert result[0] == {"a": 1, "b": 2}
+    assert result[1] == {"a": 3, "b": 4}
+
+
+def test_deduplicate_by_column():
+    rows = [
+        {"name": "Alice", "age": 30},
+        {"name": "Bob", "age": 25},
+        {"name": "Alice", "age": 35},
+    ]
+    result = deduplicate(rows, columns=["name"])
+    assert len(result) == 2
+    assert result[0]["age"] == 30  # keeps first occurrence
+
+
+def test_deduplicate_empty():
+    assert deduplicate([]) == []
+
+
+def test_deduplicate_no_duplicates():
+    rows = [{"a": 1}, {"a": 2}]
+    result = deduplicate(rows)
+    assert len(result) == 2
+
+
+# --- CsvPipeline new methods ---
+
+def test_pipeline_to_json():
+    rows = [{"name": "Alice", "age": 30}]
+    result = CsvPipeline(rows).to_json()
+    parsed = json.loads(result)
+    assert parsed == rows
+
+
+def test_pipeline_to_json_compact():
+    rows = [{"a": 1}]
+    result = CsvPipeline(rows).to_json(indent=None)
+    assert "\n" not in result
+
+
+def test_pipeline_to_dict_list():
+    rows = [{"a": 1, "b": 2, "c": 3}]
+    result = CsvPipeline(rows).to_dict_list(columns=["a", "c"])
+    assert result == [{"a": 1, "c": 3}]
+
+
+def test_pipeline_to_dict_list_all():
+    rows = [{"a": 1, "b": 2}]
+    result = CsvPipeline(rows).to_dict_list()
+    assert result == rows
+
+
+def test_pipeline_sample():
+    rows = [{"i": i} for i in range(20)]
+    result = CsvPipeline(rows).sample(5, seed=42).to_list()
+    assert len(result) == 5
+
+
+def test_pipeline_sample_reproducible():
+    rows = [{"i": i} for i in range(20)]
+    r1 = CsvPipeline(rows).sample(5, seed=42).to_list()
+    r2 = CsvPipeline(rows).sample(5, seed=42).to_list()
+    assert r1 == r2
+
+
+def test_pipeline_deduplicate():
+    rows = [{"a": 1}, {"a": 2}, {"a": 1}]
+    result = CsvPipeline(rows).deduplicate().to_list()
+    assert len(result) == 2
+
+
+def test_pipeline_deduplicate_by_column():
+    rows = [
+        {"name": "Alice", "age": 30},
+        {"name": "Bob", "age": 25},
+        {"name": "Alice", "age": 35},
+    ]
+    result = CsvPipeline(rows).deduplicate(columns=["name"]).to_list()
+    assert len(result) == 2
+    assert result[0]["age"] == 30

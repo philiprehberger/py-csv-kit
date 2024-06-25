@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0 (2026-04-01)
+
+- Add `stream_csv_rows()` for true row-by-row streaming without loading the entire file
+- Add `to_json()` and `to_dict_list()` convenience export methods
+- Add column type override via `overrides` parameter on `infer_types()` and `read_csv()`
+- Add `head(path, n)` and `sample(path, n)` functions for quick data inspection
+- Add `find_duplicates()` and `deduplicate()` for duplicate row detection and removal
+- Add `CsvPipeline.to_json()`, `.to_dict_list()`, `.sample()`, and `.deduplicate()` methods
+
 ## 0.3.1 (2026-03-31)
 
 - Standardize README to 3-badge format with emoji Support section
