@@ -3,6 +3,7 @@
 [![Tests](https://github.com/philiprehberger/py-csv-kit/actions/workflows/publish.yml/badge.svg)](https://github.com/philiprehberger/py-csv-kit/actions/workflows/publish.yml)
 [![PyPI version](https://img.shields.io/pypi/v/philiprehberger-csv-kit.svg)](https://pypi.org/project/philiprehberger-csv-kit/)
 [![License](https://img.shields.io/github/license/philiprehberger/py-csv-kit)](LICENSE)
+[![Sponsor](https://img.shields.io/badge/sponsor-GitHub%20Sponsors-ec6cb9)](https://github.com/sponsors/philiprehberger)
 
 Enhanced CSV reader and writer with automatic type inference.
 
