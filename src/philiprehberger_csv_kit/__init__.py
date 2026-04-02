@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import csv
-import io
+import json
+import random
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,9 +15,16 @@ __all__ = [
     "write_csv",
     "infer_types",
     "stream_csv",
+    "stream_csv_rows",
     "column_stats",
     "detect_dialect",
     "column_quality",
+    "to_json",
+    "to_dict_list",
+    "head",
+    "sample",
+    "deduplicate",
+    "find_duplicates",
     "CsvPipeline",
     "DialectResult",
     "QualityResult",
@@ -59,16 +67,50 @@ def _infer_value(value: str) -> int | float | bool | None | str:
     return value
 
 
-def infer_types(rows: list[dict[str, str]]) -> list[dict[str, int | float | bool | None | str]]:
+def _apply_type_override(value: str, target_type: type) -> Any:
+    """Cast a string value to a specific target type."""
+    if value == "" or value is None:
+        return None
+    if target_type is int:
+        return int(float(value))
+    if target_type is float:
+        return float(value)
+    if target_type is bool:
+        return value.lower() in ("true", "1", "yes")
+    if target_type is str:
+        return value
+    return target_type(value)
+
+
+def infer_types(
+    rows: list[dict[str, str]],
+    overrides: dict[str, type] | None = None,
+) -> list[dict[str, int | float | bool | None | str]]:
     """Take a list of string-value dicts and return with values cast to
     int, float, bool, or None where possible.
 
     Inference order: int -> float -> bool -> None -> str.
+
+    Args:
+        rows: List of row dicts with string values.
+        overrides: Optional mapping of column names to types. When a
+            column appears in *overrides*, its value is cast to the
+            given type instead of using automatic inference.
+
+    Returns:
+        List of row dicts with inferred (or overridden) types.
     """
-    return [
-        {key: _infer_value(val) for key, val in row.items()}
-        for row in rows
-    ]
+    overrides = overrides or {}
+    result: list[dict[str, int | float | bool | None | str]] = []
+    for row in rows:
+        new_row: dict[str, int | float | bool | None | str] = {}
+        for key, val in row.items():
+            if key in overrides:
+                new_row[key] = _apply_type_override(val, overrides[key])
+            else:
+                new_row[key] = _infer_value(val)
+        result.append(new_row)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +122,7 @@ def read_csv(
     path: str | Path,
     typed: bool = True,
     encoding: str = "utf-8",
+    overrides: dict[str, type] | None = None,
 ) -> list[dict[str, str]] | list[dict[str, int | float | bool | None | str]]:
     """Read a CSV file and return a list of dicts.
 
@@ -87,6 +130,8 @@ def read_csv(
         path: Path to the CSV file.
         typed: If True, automatically infer value types.
         encoding: File encoding.
+        overrides: Optional mapping of column names to types. Forces
+            specific columns to the given type instead of inferring.
 
     Returns:
         List of row dicts keyed by column headers.
@@ -96,7 +141,7 @@ def read_csv(
         rows: list[dict[str, str]] = list(reader)
 
     if typed:
-        return infer_types(rows)
+        return infer_types(rows, overrides=overrides)
     return rows
 
 
@@ -156,6 +201,220 @@ def stream_csv(
                 chunk = []
         if chunk:
             yield chunk
+
+
+def stream_csv_rows(
+    path: str | Path,
+    typed: bool = True,
+    encoding: str = "utf-8",
+) -> Iterator[dict[str, Any]]:
+    """Yield individual rows from a CSV file without loading the entire file.
+
+    This is a true streaming mode that yields one row at a time, making it
+    suitable for processing very large files with minimal memory usage.
+
+    Args:
+        path: Path to the CSV file.
+        typed: If True, automatically infer value types per row.
+        encoding: File encoding.
+
+    Yields:
+        Individual row dicts keyed by column headers.
+    """
+    with open(path, newline="", encoding=encoding) as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if typed:
+                yield {key: _infer_value(val) for key, val in row.items()}
+            else:
+                yield row
+
+
+# ---------------------------------------------------------------------------
+# Export helpers
+# ---------------------------------------------------------------------------
+
+
+def to_json(
+    rows: list[dict[str, Any]],
+    *,
+    indent: int | None = 2,
+    ensure_ascii: bool = False,
+) -> str:
+    """Serialize a list of row dicts to a JSON string.
+
+    Args:
+        rows: List of row dicts.
+        indent: JSON indentation level. ``None`` for compact output.
+        ensure_ascii: If ``False``, allow non-ASCII characters.
+
+    Returns:
+        A JSON-encoded string.
+    """
+    return json.dumps(rows, indent=indent, ensure_ascii=ensure_ascii, default=str)
+
+
+def to_dict_list(
+    rows: list[dict[str, Any]],
+    columns: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Return a filtered copy of rows as a list of plain dicts.
+
+    This is useful for selecting specific columns or obtaining a
+    clean copy of the data for further processing.
+
+    Args:
+        rows: List of row dicts.
+        columns: Column names to include. If ``None``, all columns
+            are returned.
+
+    Returns:
+        A new list of dicts containing only the requested columns.
+    """
+    if columns is None:
+        return [dict(row) for row in rows]
+    return [{col: row.get(col) for col in columns} for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# Quick inspection helpers
+# ---------------------------------------------------------------------------
+
+
+def head(
+    path: str | Path,
+    n: int = 5,
+    typed: bool = True,
+    encoding: str = "utf-8",
+) -> list[dict[str, Any]]:
+    """Return the first *n* rows from a CSV file.
+
+    Reads only the needed rows without loading the entire file.
+
+    Args:
+        path: Path to the CSV file.
+        n: Number of rows to return.
+        typed: If True, automatically infer value types.
+        encoding: File encoding.
+
+    Returns:
+        List of up to *n* row dicts.
+    """
+    result: list[dict[str, Any]] = []
+    with open(path, newline="", encoding=encoding) as f:
+        reader = csv.DictReader(f)
+        for i, row in enumerate(reader):
+            if i >= n:
+                break
+            if typed:
+                result.append({key: _infer_value(val) for key, val in row.items()})
+            else:
+                result.append(dict(row))
+    return result
+
+
+def sample(
+    path: str | Path,
+    n: int = 5,
+    typed: bool = True,
+    encoding: str = "utf-8",
+    seed: int | None = None,
+) -> list[dict[str, Any]]:
+    """Return a random sample of *n* rows from a CSV file.
+
+    Loads the full file to perform the sampling. For very large files,
+    consider using :func:`stream_csv_rows` with custom logic instead.
+
+    Args:
+        path: Path to the CSV file.
+        n: Number of rows to sample.
+        typed: If True, automatically infer value types.
+        encoding: File encoding.
+        seed: Optional random seed for reproducible results.
+
+    Returns:
+        List of up to *n* randomly selected row dicts.
+    """
+    rows = read_csv(path, typed=typed, encoding=encoding)
+    if seed is not None:
+        rng = random.Random(seed)
+    else:
+        rng = random.Random()
+    k = min(n, len(rows))
+    return rng.sample(rows, k)
+
+
+# ---------------------------------------------------------------------------
+# Duplicate detection and removal
+# ---------------------------------------------------------------------------
+
+
+def _row_key(
+    row: dict[str, Any],
+    columns: list[str] | None = None,
+) -> tuple[Any, ...]:
+    """Create a hashable key from a row dict for duplicate detection."""
+    if columns is not None:
+        return tuple(row.get(col) for col in columns)
+    return tuple(sorted(row.items()))
+
+
+def find_duplicates(
+    rows: list[dict[str, Any]],
+    columns: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Find duplicate rows in a list of dicts.
+
+    Two rows are considered duplicates if they share the same values for
+    the specified *columns*. If *columns* is ``None``, all columns are
+    compared.
+
+    Args:
+        rows: List of row dicts.
+        columns: Column names to compare. If ``None``, all columns
+            are compared.
+
+    Returns:
+        List of rows that are duplicates (second and subsequent
+        occurrences).
+    """
+    seen: set[tuple[Any, ...]] = set()
+    duplicates: list[dict[str, Any]] = []
+    for row in rows:
+        key = _row_key(row, columns)
+        if key in seen:
+            duplicates.append(row)
+        else:
+            seen.add(key)
+    return duplicates
+
+
+def deduplicate(
+    rows: list[dict[str, Any]],
+    columns: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Remove duplicate rows, keeping the first occurrence.
+
+    Two rows are considered duplicates if they share the same values for
+    the specified *columns*. If *columns* is ``None``, all columns are
+    compared.
+
+    Args:
+        rows: List of row dicts.
+        columns: Column names to compare. If ``None``, all columns
+            are compared.
+
+    Returns:
+        List of unique rows (first occurrence kept).
+    """
+    seen: set[tuple[Any, ...]] = set()
+    unique: list[dict[str, Any]] = []
+    for row in rows:
+        key = _row_key(row, columns)
+        if key not in seen:
+            seen.add(key)
+            unique.append(row)
+    return unique
 
 
 # ---------------------------------------------------------------------------
@@ -471,11 +730,59 @@ class CsvPipeline:
         """Keep only the last *n* rows."""
         return CsvPipeline(self._rows[-n:] if n > 0 else [])
 
+    # -- Sampling -----------------------------------------------------------
+
+    def sample(self, n: int, *, seed: int | None = None) -> CsvPipeline:
+        """Return a random sample of *n* rows.
+
+        Args:
+            n: Number of rows to sample.
+            seed: Optional random seed for reproducible results.
+        """
+        rng = random.Random(seed) if seed is not None else random.Random()
+        k = min(n, len(self._rows))
+        return CsvPipeline(rng.sample(self._rows, k))
+
+    # -- Deduplication ------------------------------------------------------
+
+    def deduplicate(self, columns: list[str] | None = None) -> CsvPipeline:
+        """Remove duplicate rows, keeping the first occurrence.
+
+        Args:
+            columns: Column names to compare. If ``None``, all columns
+                are compared.
+        """
+        return CsvPipeline(deduplicate(self._rows, columns=columns))
+
     # -- Terminal operations ------------------------------------------------
 
     def to_list(self) -> list[Row]:
         """Return the current rows as a plain list of dicts."""
         return list(self._rows)
+
+    def to_json(self, *, indent: int | None = 2, ensure_ascii: bool = False) -> str:
+        """Serialize the current rows to a JSON string.
+
+        Args:
+            indent: JSON indentation level. ``None`` for compact output.
+            ensure_ascii: If ``False``, allow non-ASCII characters.
+
+        Returns:
+            A JSON-encoded string.
+        """
+        return to_json(self._rows, indent=indent, ensure_ascii=ensure_ascii)
+
+    def to_dict_list(self, columns: list[str] | None = None) -> list[Row]:
+        """Return the current rows as a list of plain dicts.
+
+        Args:
+            columns: Column names to include. If ``None``, all columns
+                are returned.
+
+        Returns:
+            A new list of dicts.
+        """
+        return to_dict_list(self._rows, columns=columns)
 
     def count(self) -> int:
         """Return the number of rows."""

@@ -14,8 +14,6 @@ pip install philiprehberger-csv-kit
 
 ## Usage
 
-### Reading CSV
-
 ```python
 from philiprehberger_csv_kit import read_csv
 
@@ -47,11 +45,72 @@ write_csv("output.csv", rows, columns=["name", "age"])  # select columns
 ### Streaming large files
 
 ```python
-from philiprehberger_csv_kit import stream_csv
+from philiprehberger_csv_kit import stream_csv, stream_csv_rows
 
+# Chunked streaming (lists of rows)
 for chunk in stream_csv("large.csv", chunk_size=500):
     for row in chunk:
         process(row)
+
+# Row-by-row streaming (minimal memory usage)
+for row in stream_csv_rows("large.csv"):
+    process(row)
+```
+
+### Column type override
+
+```python
+from philiprehberger_csv_kit import read_csv, infer_types
+
+# Force specific columns to a type instead of auto-inferring
+rows = read_csv("data.csv", overrides={"id": str, "score": int})
+
+# Also available on infer_types directly
+raw = [{"id": "42", "score": "9.5"}]
+typed = infer_types(raw, overrides={"id": str, "score": int})
+# [{"id": "42", "score": 9}]
+```
+
+### Quick inspection
+
+```python
+from philiprehberger_csv_kit import head, sample
+
+# First 5 rows (without loading the entire file)
+rows = head("data.csv", n=5)
+
+# Random sample of 10 rows (reproducible with seed)
+rows = sample("data.csv", n=10, seed=42)
+```
+
+### Export helpers
+
+```python
+from philiprehberger_csv_kit import read_csv, to_json, to_dict_list
+
+rows = read_csv("data.csv")
+
+# Serialize to JSON string
+json_str = to_json(rows, indent=2)
+
+# Extract specific columns as a list of dicts
+subset = to_dict_list(rows, columns=["name", "age"])
+```
+
+### Duplicate detection
+
+```python
+from philiprehberger_csv_kit import read_csv, find_duplicates, deduplicate
+
+rows = read_csv("data.csv")
+
+# Find duplicate rows
+dupes = find_duplicates(rows)
+dupes_by_name = find_duplicates(rows, columns=["name"])
+
+# Remove duplicates (keeps first occurrence)
+unique = deduplicate(rows)
+unique_by_name = deduplicate(rows, columns=["name"])
 ```
 
 ### Column statistics
@@ -104,9 +163,16 @@ result = (
     CsvPipeline(rows)
     .filter(lambda r: r["age"] > 18)
     .map_column("name", str.upper)
+    .deduplicate(columns=["name"])
     .sort_by("age")
     .to_list()
 )
+
+# Export pipeline results as JSON
+json_str = CsvPipeline(rows).filter(lambda r: r["active"] is True).to_json()
+
+# Random sample from pipeline
+sampled = CsvPipeline(rows).sample(10, seed=42).to_list()
 
 # Group by department
 groups = (
@@ -131,14 +197,21 @@ typed = infer_types(raw)
 
 | Function / Class | Description |
 |---|---|
-| `read_csv(path, typed=True, encoding="utf-8")` | Read CSV file, return list of dicts. Infers types when `typed=True`. |
+| `read_csv(path, typed=True, encoding="utf-8", overrides=None)` | Read CSV file, return list of dicts. Infers types when `typed=True`. Optional type overrides per column. |
 | `write_csv(path, rows, columns=None, encoding="utf-8")` | Write list of dicts to CSV. Optional column filter. |
 | `stream_csv(path, chunk_size=1000, encoding="utf-8")` | Generator yielding chunks of row dicts for memory-efficient reading. |
+| `stream_csv_rows(path, typed=True, encoding="utf-8")` | Generator yielding individual row dicts for true row-by-row streaming. |
+| `infer_types(rows, overrides=None)` | Cast string values to int, float, bool, or None. Optional per-column type overrides. |
+| `head(path, n=5, typed=True, encoding="utf-8")` | Return the first *n* rows from a CSV file without loading the entire file. |
+| `sample(path, n=5, typed=True, encoding="utf-8", seed=None)` | Return a random sample of *n* rows from a CSV file. |
+| `to_json(rows, indent=2, ensure_ascii=False)` | Serialize a list of row dicts to a JSON string. |
+| `to_dict_list(rows, columns=None)` | Return a filtered copy of rows as a list of plain dicts. |
+| `find_duplicates(rows, columns=None)` | Find duplicate rows. Returns second and subsequent occurrences. |
+| `deduplicate(rows, columns=None)` | Remove duplicate rows, keeping the first occurrence. |
 | `column_stats(path, columns=None)` | Compute per-column stats: min, max, unique, nulls, count. |
-| `infer_types(rows)` | Cast string values to int, float, bool, or None where possible. |
 | `detect_dialect(filepath_or_sample)` | Detect CSV delimiter, quotechar, and formatting from a file or text sample. Returns `DialectResult`. |
 | `column_quality(rows, column)` | Score column data quality: completeness %, cardinality ratio, null count. Returns `QualityResult`. |
-| `CsvPipeline(rows)` | Chainable pipeline with `.filter()`, `.map_column()`, `.add_column()`, `.rename_column()`, `.select_columns()`, `.sort_by()`, `.group_by()`, `.head()`, `.tail()`, `.to_list()`, `.count()`, `.first()`. |
+| `CsvPipeline(rows)` | Chainable pipeline with `.filter()`, `.exclude()`, `.map_column()`, `.add_column()`, `.rename_column()`, `.select_columns()`, `.sort_by()`, `.group_by()`, `.head()`, `.tail()`, `.sample()`, `.deduplicate()`, `.to_list()`, `.to_json()`, `.to_dict_list()`, `.count()`, `.first()`. |
 
 ## Development
 
