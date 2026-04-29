@@ -725,3 +725,51 @@ def test_pipeline_deduplicate_by_column():
     result = CsvPipeline(rows).deduplicate(columns=["name"]).to_list()
     assert len(result) == 2
     assert result[0]["age"] == 30
+
+
+# ---------------------------------------------------------------------------
+# CsvPipeline.aggregate
+# ---------------------------------------------------------------------------
+
+
+def test_aggregate_count():
+    rows = [
+        {"city": "NYC", "age": 30},
+        {"city": "NYC", "age": 25},
+        {"city": "LA", "age": 40},
+    ]
+    result = CsvPipeline(rows).aggregate("city", count=len)
+    by_city = {r["city"]: r for r in result}
+    assert by_city["NYC"]["count"] == 2
+    assert by_city["LA"]["count"] == 1
+
+
+def test_aggregate_multiple_functions():
+    rows = [
+        {"city": "NYC", "age": 30},
+        {"city": "NYC", "age": 25},
+        {"city": "LA", "age": 40},
+    ]
+    result = CsvPipeline(rows).aggregate(
+        "city",
+        count=len,
+        avg_age=lambda rs: sum(r["age"] for r in rs) / len(rs),
+        max_age=lambda rs: max(r["age"] for r in rs),
+    )
+    by_city = {r["city"]: r for r in result}
+    assert by_city["NYC"]["count"] == 2
+    assert by_city["NYC"]["avg_age"] == 27.5
+    assert by_city["NYC"]["max_age"] == 30
+    assert by_city["LA"]["avg_age"] == 40
+
+
+def test_aggregate_empty_pipeline_returns_empty():
+    assert CsvPipeline([]).aggregate("city", count=len) == []
+
+
+def test_aggregate_preserves_group_key_in_result():
+    rows = [{"k": "a", "v": 1}, {"k": "b", "v": 2}]
+    result = CsvPipeline(rows).aggregate("k", total=lambda rs: sum(r["v"] for r in rs))
+    keys = {r["k"] for r in result}
+    assert keys == {"a", "b"}
+

@@ -181,6 +181,21 @@ groups = (
     .group_by("department")
 )
 # {"Engineering": [...], "Sales": [...]}
+
+# Aggregate per group — supply named aggregations as kwargs
+summary = (
+    CsvPipeline(rows)
+    .aggregate(
+        "department",
+        count=len,
+        avg_age=lambda rs: sum(r["age"] for r in rs) / len(rs),
+        max_salary=lambda rs: max(r["salary"] for r in rs),
+    )
+)
+# [
+#   {"department": "Engineering", "count": 12, "avg_age": 31.4, "max_salary": 180000},
+#   {"department": "Sales", "count": 8, "avg_age": 28.7, "max_salary": 140000},
+# ]
 ```
 
 ### Type inference
@@ -211,7 +226,7 @@ typed = infer_types(raw)
 | `column_stats(path, columns=None)` | Compute per-column stats: min, max, unique, nulls, count. |
 | `detect_dialect(filepath_or_sample)` | Detect CSV delimiter, quotechar, and formatting from a file or text sample. Returns `DialectResult`. |
 | `column_quality(rows, column)` | Score column data quality: completeness %, cardinality ratio, null count. Returns `QualityResult`. |
-| `CsvPipeline(rows)` | Chainable pipeline with `.filter()`, `.exclude()`, `.map_column()`, `.add_column()`, `.rename_column()`, `.select_columns()`, `.sort_by()`, `.group_by()`, `.head()`, `.tail()`, `.sample()`, `.deduplicate()`, `.to_list()`, `.to_json()`, `.to_dict_list()`, `.count()`, `.first()`. |
+| `CsvPipeline(rows)` | Chainable pipeline with `.filter()`, `.exclude()`, `.map_column()`, `.add_column()`, `.rename_column()`, `.select_columns()`, `.sort_by()`, `.group_by()`, `.aggregate()`, `.head()`, `.tail()`, `.sample()`, `.deduplicate()`, `.to_list()`, `.to_json()`, `.to_dict_list()`, `.count()`, `.first()`. |
 
 ## Development
 

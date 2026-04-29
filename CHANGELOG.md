@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.0 (2026-04-28)
+
+- Add `CsvPipeline.aggregate(group_key, **agg_fns)` for grouped aggregations — each keyword arg is a result column whose value is computed from the list of rows in the group
+
 ## 0.4.0 (2026-04-01)
 
 - Add `stream_csv_rows()` for true row-by-row streaming without loading the entire file

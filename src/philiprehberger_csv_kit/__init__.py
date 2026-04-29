@@ -720,6 +720,48 @@ class CsvPipeline:
             groups.setdefault(k, []).append(row)
         return groups
 
+    # -- Aggregation --------------------------------------------------------
+
+    def aggregate(
+        self,
+        group_key: str,
+        **agg_fns: Callable[[list[Row]], Any],
+    ) -> list[Row]:
+        """Group rows by *group_key* and compute aggregate values per group.
+
+        Each keyword argument is an aggregation: the parameter name becomes
+        the result column, and the callable receives the list of rows in that
+        group and returns a scalar.
+
+        This is a terminal operation that returns a list of dicts, one per
+        distinct group value. The group key is included in each result row.
+
+        Args:
+            group_key: Column name to group by.
+            **agg_fns: Mapping of result-column name to a function that
+                takes a ``list[Row]`` and returns the aggregate value.
+
+        Returns:
+            A list of result dicts, one per group.
+
+        Example::
+
+            CsvPipeline(rows).aggregate(
+                "city",
+                count=len,
+                avg_age=lambda rs: sum(r["age"] for r in rs) / len(rs),
+            )
+            # [{"city": "NYC", "count": 4, "avg_age": 32.5}, ...]
+        """
+        groups = self.group_by(group_key)
+        results: list[Row] = []
+        for value, rows in groups.items():
+            result_row: Row = {group_key: value}
+            for col, fn in agg_fns.items():
+                result_row[col] = fn(rows)
+            results.append(result_row)
+        return results
+
     # -- Limiting -----------------------------------------------------------
 
     def head(self, n: int) -> CsvPipeline:
