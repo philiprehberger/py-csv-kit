@@ -4,6 +4,8 @@
 [![PyPI version](https://img.shields.io/pypi/v/philiprehberger-csv-kit.svg)](https://pypi.org/project/philiprehberger-csv-kit/)
 [![Last updated](https://img.shields.io/github/last-commit/philiprehberger/py-csv-kit)](https://github.com/philiprehberger/py-csv-kit/commits/main)
 
+![philiprehberger-csv-kit](https://raw.githubusercontent.com/philiprehberger/py-csv-kit/main/package-card.webp)
+
 Enhanced CSV reader and writer with automatic type inference.
 
 ## Installation
@@ -198,6 +200,23 @@ summary = (
 # ]
 ```
 
+### Distinct column values
+
+```python
+from philiprehberger_csv_kit import CsvPipeline
+
+rows = [
+    {"city": "NYC"},
+    {"city": "LA"},
+    {"city": "NYC"},
+    {"city": "Chicago"},
+]
+CsvPipeline(rows).distinct("city")
+# ["NYC", "LA", "Chicago"]
+```
+
+Preserves first-seen order and is a terminal operation (returns a list, not a pipeline).
+
 ### Type inference
 
 ```python
@@ -226,7 +245,7 @@ typed = infer_types(raw)
 | `column_stats(path, columns=None)` | Compute per-column stats: min, max, unique, nulls, count. |
 | `detect_dialect(filepath_or_sample)` | Detect CSV delimiter, quotechar, and formatting from a file or text sample. Returns `DialectResult`. |
 | `column_quality(rows, column)` | Score column data quality: completeness %, cardinality ratio, null count. Returns `QualityResult`. |
-| `CsvPipeline(rows)` | Chainable pipeline with `.filter()`, `.exclude()`, `.map_column()`, `.add_column()`, `.rename_column()`, `.select_columns()`, `.sort_by()`, `.group_by()`, `.aggregate()`, `.head()`, `.tail()`, `.sample()`, `.deduplicate()`, `.to_list()`, `.to_json()`, `.to_dict_list()`, `.count()`, `.first()`. |
+| `CsvPipeline(rows)` | Chainable pipeline with `.filter()`, `.exclude()`, `.map_column()`, `.add_column()`, `.rename_column()`, `.select_columns()`, `.sort_by()`, `.group_by()`, `.aggregate()`, `.head()`, `.tail()`, `.sample()`, `.deduplicate()`, `.distinct()`, `.to_list()`, `.to_json()`, `.to_dict_list()`, `.count()`, `.first()`. |
 
 ## Development
 

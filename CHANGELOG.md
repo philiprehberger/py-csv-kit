@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.0 (2026-06-04)
+
+- Add `CsvPipeline.distinct(column)` terminal op returning unique column values in first-seen order — handy for quickly enumerating categories without `set()` gymnastics
+- Add `package-card.webp` to README
+
 ## 0.5.0 (2026-04-28)
 
 - Add `CsvPipeline.aggregate(group_key, **agg_fns)` for grouped aggregations — each keyword arg is a result column whose value is computed from the list of rows in the group

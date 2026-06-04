@@ -773,3 +773,40 @@ def test_aggregate_preserves_group_key_in_result():
     keys = {r["k"] for r in result}
     assert keys == {"a", "b"}
 
+
+
+# CsvPipeline.distinct
+
+
+def test_pipeline_distinct_preserves_first_seen_order() -> None:
+    from philiprehberger_csv_kit import CsvPipeline
+
+    rows = [
+        {"city": "NYC"},
+        {"city": "LA"},
+        {"city": "NYC"},
+        {"city": "Chicago"},
+        {"city": "LA"},
+    ]
+    assert CsvPipeline(rows).distinct("city") == ["NYC", "LA", "Chicago"]
+
+
+def test_pipeline_distinct_includes_none() -> None:
+    from philiprehberger_csv_kit import CsvPipeline
+
+    rows = [{"x": 1}, {"x": None}, {"x": 1}, {"x": None}]
+    assert CsvPipeline(rows).distinct("x") == [1, None]
+
+
+def test_pipeline_distinct_after_filter() -> None:
+    from philiprehberger_csv_kit import CsvPipeline
+
+    rows = [
+        {"city": "NYC", "active": True},
+        {"city": "LA", "active": False},
+        {"city": "NYC", "active": True},
+    ]
+    distinct_active = (
+        CsvPipeline(rows).filter(lambda r: r["active"]).distinct("city")
+    )
+    assert distinct_active == ["NYC"]

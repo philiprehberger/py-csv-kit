@@ -796,6 +796,36 @@ class CsvPipeline:
         """
         return CsvPipeline(deduplicate(self._rows, columns=columns))
 
+    # -- Distinct values ----------------------------------------------------
+
+    def distinct(self, column: str) -> list[Any]:
+        """Return unique values in *column*, preserving first-seen order.
+
+        Terminal operation. ``None`` is included if it appears. Useful for
+        quickly enumerating the categories present in a column without
+        sprinkling ``set()`` and re-sorting throughout calling code.
+
+        Args:
+            column: The column name to extract.
+
+        Returns:
+            A list of unique values in the order they were first seen.
+        """
+        seen: set[Any] = set()
+        result: list[Any] = []
+        for row in self._rows:
+            value = row.get(column)
+            try:
+                if value in seen:
+                    continue
+                seen.add(value)
+            except TypeError:
+                # Unhashable value: keep it but fall back to a linear scan.
+                if value in result:
+                    continue
+            result.append(value)
+        return result
+
     # -- Terminal operations ------------------------------------------------
 
     def to_list(self) -> list[Row]:
